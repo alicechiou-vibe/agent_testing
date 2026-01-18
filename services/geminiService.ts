@@ -10,7 +10,8 @@ if (!apiKey) {
 
 const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy_key_to_prevent_init_crash' });
 
-const MODEL_NAME = 'gemini-3-pro-preview';
+// Switched to Flash model to prevent 429 Resource Exhausted errors and improve speed
+const MODEL_NAME = 'gemini-3-flash-preview';
 
 interface GenerateReportResult {
   content: string;
@@ -35,12 +36,12 @@ export const generateMarketReport = async (type: ReportType): Promise<GenerateRe
       Role: Senior Financial Analyst for a Chinese audience.
       Task: Provide a "US Market Evening Briefing" (美股晚報).
       
-      1. **Today's Market Drivers**: Search for major news, economic data, or Fed speeches that happened *today*.
-      2. **Sentiment Analysis**: Analyze the general market sentiment of the current trading session.
-      3. **Outlook**: Provide a brief prediction for the close or next day open.
+      1. **Today's Major News**: Identify the most significant news, economic data, or earnings released *today* that are driving the market.
+      2. **Market Sentiment & Trend**: Analyze the current market mood (Bullish/Bearish/Neutral) and the estimated trend for the close.
+      3. **Outlook**: Brief prediction for the next session.
       
       Output Language: Traditional Chinese (繁體中文).
-      Format: Use Markdown. Keep it concise, readable on mobile.
+      Format: Use Markdown. Keep it concise, professional, and readable on mobile.
     `;
   } else {
     // 早上：重點是「昨天」收盤的表現 (Mag 7)
@@ -64,7 +65,7 @@ export const generateMarketReport = async (type: ReportType): Promise<GenerateRe
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        responseMimeType: "text/plain",
+        // responseMimeType: "text/plain", // Removed to let model decide best format with grounding
       },
     });
 
@@ -91,6 +92,9 @@ export const generateMarketReport = async (type: ReportType): Promise<GenerateRe
     console.error("Gemini API Error:", error);
     // Return a more user-friendly error message if possible
     const errorMessage = error.message || "Unknown error";
+    if (errorMessage.includes("429") || errorMessage.includes("Quota")) {
+        throw new Error("系統繁忙 (429)，請稍後再試。");
+    }
     if (errorMessage.includes("API key")) {
         throw new Error("API Key 無效或過期。");
     }
