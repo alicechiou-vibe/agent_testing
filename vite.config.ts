@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     // Handle the specific repo name for GitHub Pages deployment
-    base: '/agent_testing/', 
+    base: './', 
     define: {
       // Polyfill process.env for the app code
       'process.env.API_KEY': JSON.stringify(env.API_KEY),
