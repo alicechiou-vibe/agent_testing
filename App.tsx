@@ -1,277 +1,157 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { generateMarketReport } from './services/geminiService';
 import { ReportCard } from './components/ReportCard';
-import { ConfigPanel } from './components/ConfigPanel';
-import { Clock } from './components/Clock';
-import { ReportConfig, ReportData, ReportType, LogEntry } from './types';
-import { LayoutDashboard, History, Zap, Play } from 'lucide-react';
+import { ReportData, ReportType } from './types';
+import { Zap, RefreshCcw, Sun, Moon, Sparkles } from 'lucide-react';
 
 const App: React.FC = () => {
-  // --- State ---
-  const [config, setConfig] = useState<ReportConfig>({
-    morningTime: "08:00",
-    eveningTime: "22:00",
-    email: "",
-    isActive: false,
-  });
+  const [currentType, setCurrentType] = useState<ReportType>(ReportType.MORNING);
+  const [report, setReport] = useState<ReportData | null>(null);
+  
+  // Initialize context based on time of day
+  useEffect(() => {
+    const hour = new Date().getHours();
+    // 05:00 - 14:00 (5 AM - 2 PM) -> Morning Briefing (Yesterday's recap)
+    // 14:00 - 05:00 (2 PM - 5 AM) -> Evening Briefing (Today's news)
+    const type = (hour >= 5 && hour < 14) ? ReportType.MORNING : ReportType.EVENING;
+    setCurrentType(type);
+    loadSavedReport(type);
+  }, []);
 
-  const [reports, setReports] = useState<ReportData[]>([]);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history'>('dashboard');
-
-  // To prevent double firing in the same minute
-  const lastRunMorning = useRef<string | null>(null);
-  const lastRunEvening = useRef<string | null>(null);
-
-  // --- Helpers ---
-  const addLog = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
-    setLogs(prev => [{ id: Date.now().toString(), timestamp: Date.now(), message, type }, ...prev]);
+  const getStorageKey = (type: ReportType) => {
+    const today = new Date().toDateString();
+    return `marketflow-${today}-${type}`;
   };
 
-  const createReportEntry = (type: ReportType): string => {
-    const id = Date.now().toString();
+  const loadSavedReport = (type: ReportType) => {
+    const key = getStorageKey(type);
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        setReport(JSON.parse(saved));
+      } catch (e) {
+        localStorage.removeItem(key);
+      }
+    } else {
+      setReport(null);
+    }
+  };
+
+  const handleGenerate = async (forceType?: ReportType) => {
+    const typeToRun = forceType || currentType;
+    
+    // Create skeleton
     const newReport: ReportData = {
-      id,
-      type,
+      id: Date.now().toString(),
+      type: typeToRun,
+      dateStr: new Date().toDateString(),
       timestamp: Date.now(),
       content: "",
       groundingUrls: [],
       status: 'generating'
     };
-    setReports(prev => [newReport, ...prev]);
-    return id;
-  };
-
-  const updateReport = (id: string, updates: Partial<ReportData>) => {
-    setReports(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
-  };
-
-  const executeTask = useCallback(async (type: ReportType, manual: boolean = false) => {
-    addLog(`Starting ${type} report generation...`, 'info');
-    const reportId = createReportEntry(type);
+    
+    setReport(newReport);
+    setCurrentType(typeToRun);
 
     try {
-      const result = await generateMarketReport(type);
-      
-      updateReport(reportId, {
+      const result = await generateMarketReport(typeToRun);
+      const completedReport: ReportData = {
+        ...newReport,
         content: result.content,
         groundingUrls: result.urls,
-        status: 'sent' // Simulating email sent immediately
-      });
-
-      addLog(`${type} report generated successfully.`, 'success');
+        status: 'completed'
+      };
+      setReport(completedReport);
       
-      // Simulate Email Sending Action
-      if (config.email) {
-        addLog(`(Simulation) Email sent to ${config.email}`, 'info');
-        // In a real browser app without backend, we can trigger mailto, but that's intrusive for automation.
-        // We'll just show the visual confirmation.
-      } else if (!manual) {
-        addLog(`No email configured, skipping delivery.`, 'error');
-      }
-
+      // Save to local storage so user doesn't lose it on refresh
+      localStorage.setItem(getStorageKey(typeToRun), JSON.stringify(completedReport));
+      
     } catch (error) {
-      updateReport(reportId, { status: 'failed', content: "Failed to generate report. Please check API Key configuration." });
-      addLog(`Failed to generate ${type} report.`, 'error');
+      setReport(prev => prev ? { ...prev, status: 'failed', content: "生成失敗，請檢查網路或稍後再試。" } : null);
     }
-  }, [config.email]);
+  };
 
-  // --- Automation Loop ---
-  useEffect(() => {
-    if (!config.isActive) return;
+  // Switch context manually
+  const toggleContext = () => {
+    const newType = currentType === ReportType.MORNING ? ReportType.EVENING : ReportType.MORNING;
+    setCurrentType(newType);
+    loadSavedReport(newType);
+  };
 
-    const checkSchedule = () => {
-      const now = new Date();
-      const currentHm = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-      const dateStr = now.toDateString(); // "Mon Jan 01 2024"
+  const isMorning = currentType === ReportType.MORNING;
 
-      // Morning Check
-      if (currentHm === config.morningTime && lastRunMorning.current !== dateStr) {
-        lastRunMorning.current = dateStr;
-        executeTask(ReportType.MORNING);
-      }
-
-      // Evening Check
-      if (currentHm === config.eveningTime && lastRunEvening.current !== dateStr) {
-        lastRunEvening.current = dateStr;
-        executeTask(ReportType.EVENING);
-      }
-    };
-
-    const interval = setInterval(checkSchedule, 1000); // Check every second to catch the minute transition accurately
-    return () => clearInterval(interval);
-  }, [config.isActive, config.morningTime, config.eveningTime, executeTask]);
-
-  // --- UI ---
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 selection:bg-indigo-500/30">
-      
-      {/* Navbar */}
-      <nav className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <div className="bg-indigo-600 p-2 rounded-lg">
-                <Zap className="w-5 h-5 text-white" />
-              </div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-                MarketFlow AI
-              </h1>
-            </div>
-            
-            <div className="hidden md:flex items-center space-x-4">
-              <button 
-                onClick={() => setActiveTab('dashboard')}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'dashboard' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Dashboard
-              </button>
-              <button 
-                onClick={() => setActiveTab('history')}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Run Logs
-              </button>
-            </div>
-
-            <Clock />
+    <div className="min-h-screen bg-[#0f172a] text-slate-200 pb-12">
+      {/* Mobile Top Bar */}
+      <header className="px-6 pt-8 pb-4 flex justify-between items-center sticky top-0 bg-[#0f172a]/80 backdrop-blur-md z-20">
+        <div className="flex items-center gap-2.5">
+          <div className={`p-2 rounded-xl bg-gradient-to-br ${isMorning ? 'from-amber-400 to-orange-500' : 'from-indigo-400 to-purple-600'} shadow-lg`}>
+            <Zap className="w-5 h-5 text-white fill-white" />
           </div>
+          <span className="font-bold text-xl tracking-tight">MarketFlow</span>
         </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {activeTab === 'dashboard' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* Left Column: Config & Controls */}
-            <div className="lg:col-span-1 space-y-6">
-              <ConfigPanel config={config} onUpdate={setConfig} />
+        <button 
+          onClick={toggleContext}
+          className="p-2.5 rounded-full bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition-colors active:scale-95"
+          aria-label="Switch Mode"
+        >
+          {isMorning ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+        </button>
+      </header>
 
-              {/* Manual Triggers */}
-              <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Manual Override</h3>
-                <div className="space-y-3">
-                  <button 
-                    onClick={() => executeTask(ReportType.MORNING, true)}
-                    className="w-full flex items-center justify-between px-4 py-3 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-200 transition-all group"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Play className="w-4 h-4 text-amber-500" />
-                      Run Morning Briefing
-                    </span>
-                    <span className="text-xs text-slate-500 group-hover:text-slate-400">Mag 7 Review</span>
-                  </button>
-                  
-                  <button 
-                    onClick={() => executeTask(ReportType.EVENING, true)}
-                    className="w-full flex items-center justify-between px-4 py-3 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-200 transition-all group"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Play className="w-4 h-4 text-blue-500" />
-                      Run Evening Briefing
-                    </span>
-                    <span className="text-xs text-slate-500 group-hover:text-slate-400">News & Trends</span>
-                  </button>
-                </div>
-              </div>
+      <main className="px-4 max-w-md mx-auto w-full">
+        
+        {/* Welcome / Context Header */}
+        <div className="mb-6 mt-2">
+          <h1 className="text-3xl font-bold text-white mb-1">
+            {isMorning ? '早安，投資人' : '晚安，投資人'}
+          </h1>
+          <p className="text-slate-400 text-sm flex items-center gap-2">
+            {isMorning 
+              ? <span>這裡是您昨天的 <span className="text-amber-400 font-medium">七巨頭報告</span></span>
+              : <span>為您整理今天的 <span className="text-indigo-400 font-medium">市場重點新聞</span></span>
+            }
+          </p>
+        </div>
 
-               {/* Log Preview */}
-               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 overflow-hidden">
-                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <History className="w-3 h-3" /> Recent Activity
-                </h3>
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                  {logs.length === 0 && <p className="text-xs text-slate-600 italic">No activity recorded yet.</p>}
-                  {logs.map(log => (
-                    <div key={log.id} className="text-xs flex gap-2">
-                      <span className="text-slate-500 font-mono whitespace-nowrap">
-                        {new Date(log.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
-                      </span>
-                      <span className={`${
-                        log.type === 'success' ? 'text-emerald-400' : 
-                        log.type === 'error' ? 'text-rose-400' : 'text-slate-300'
-                      }`}>
-                        {log.message}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Reports Feed */}
-            <div className="lg:col-span-2">
-              <h2 className="text-xl font-semibold text-slate-100 mb-6 flex items-center gap-2">
-                <LayoutDashboard className="w-5 h-5 text-indigo-400" />
-                Live Reports Feed
-              </h2>
-              
-              <div className="space-y-6">
-                {reports.length === 0 ? (
-                  <div className="bg-slate-800/50 border border-dashed border-slate-700 rounded-xl p-12 text-center">
-                    <div className="bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Zap className="w-8 h-8 text-slate-600" />
-                    </div>
-                    <h3 className="text-lg font-medium text-slate-300">System Ready</h3>
-                    <p className="text-slate-500 max-w-sm mx-auto mt-2">
-                      Waiting for scheduled time ({config.morningTime} or {config.eveningTime}) or manual trigger. 
-                      Ensure this tab remains open for automation to occur.
-                    </p>
-                  </div>
-                ) : (
-                  reports.map(report => (
-                    <ReportCard key={report.id} report={report} />
-                  ))
-                )}
-              </div>
-            </div>
-
+        {/* Action Area */}
+        {!report ? (
+          <div className="mt-12 text-center animate-slide-up">
+             <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-slate-800/50 flex items-center justify-center border border-slate-700 relative group cursor-pointer" onClick={() => handleGenerate()}>
+                <div className={`absolute inset-0 rounded-full blur-xl opacity-20 group-hover:opacity-40 transition-opacity ${isMorning ? 'bg-amber-500' : 'bg-indigo-500'}`}></div>
+                <Sparkles className={`w-10 h-10 ${isMorning ? 'text-amber-400' : 'text-indigo-400'}`} />
+             </div>
+             <p className="text-slate-400 text-sm mb-8">
+               {isMorning ? "尚未生成今日早報" : "尚未生成今日晚報"}
+             </p>
+             <button
+              onClick={() => handleGenerate()}
+              className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
+                isMorning 
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-amber-500/20' 
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20'
+              }`}
+            >
+              <Sparkles className="w-5 h-5" />
+              {isMorning ? '生成早報分析' : '分析今日市場'}
+            </button>
           </div>
+        ) : (
+          <>
+            <ReportCard report={report} />
+            
+            <button
+              onClick={() => handleGenerate()}
+              className="mt-6 w-full py-3 rounded-xl border border-slate-700 text-slate-400 font-medium text-sm flex items-center justify-center gap-2 hover:bg-slate-800 hover:text-white transition-all active:scale-[0.98]"
+            >
+              <RefreshCcw className="w-4 h-4" />
+              重新生成分析
+            </button>
+          </>
         )}
 
-        {/* History Tab */}
-        {activeTab === 'history' && (
-           <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-             <div className="px-6 py-4 border-b border-slate-700 bg-slate-800/50">
-               <h2 className="text-lg font-semibold text-slate-100">System Logs</h2>
-             </div>
-             <div className="p-0">
-               <table className="w-full text-left text-sm text-slate-400">
-                 <thead className="bg-slate-900/50 uppercase tracking-wider text-xs font-semibold text-slate-500">
-                   <tr>
-                     <th className="px-6 py-3">Timestamp</th>
-                     <th className="px-6 py-3">Type</th>
-                     <th className="px-6 py-3">Message</th>
-                   </tr>
-                 </thead>
-                 <tbody className="divide-y divide-slate-700">
-                   {logs.map(log => (
-                     <tr key={log.id} className="hover:bg-slate-700/20 transition-colors">
-                       <td className="px-6 py-3 font-mono text-slate-500">
-                         {new Date(log.timestamp).toLocaleString()}
-                       </td>
-                       <td className="px-6 py-3">
-                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                           log.type === 'success' ? 'bg-emerald-400/10 text-emerald-400' :
-                           log.type === 'error' ? 'bg-rose-400/10 text-rose-400' :
-                           'bg-blue-400/10 text-blue-400'
-                         }`}>
-                           {log.type.toUpperCase()}
-                         </span>
-                       </td>
-                       <td className="px-6 py-3 text-slate-300">{log.message}</td>
-                     </tr>
-                   ))}
-                 </tbody>
-               </table>
-               {logs.length === 0 && (
-                 <div className="p-8 text-center text-slate-500">No logs available.</div>
-               )}
-             </div>
-           </div>
-        )}
       </main>
     </div>
   );

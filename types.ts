@@ -4,24 +4,18 @@ export enum ReportType {
 }
 
 export interface ReportConfig {
-  morningTime: string; // Format "HH:mm" e.g., "08:00"
-  eveningTime: string; // Format "HH:mm" e.g., "22:00"
-  email: string;
   isActive: boolean;
+  morningTime: string;
+  eveningTime: string;
+  email: string;
 }
 
 export interface ReportData {
   id: string;
   type: ReportType;
+  dateStr: string; // "YYYY-MM-DD"
   timestamp: number;
   content: string;
   groundingUrls: Array<{ title: string; url: string }>;
-  status: 'generating' | 'completed' | 'failed' | 'sent';
-}
-
-export interface LogEntry {
-  id: string;
-  timestamp: number;
-  message: string;
-  type: 'info' | 'success' | 'error';
+  status: 'generating' | 'completed' | 'failed';
 }
