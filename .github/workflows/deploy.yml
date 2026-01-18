@@ -25,10 +25,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          # Cache removed temporarily because it requires package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        # Changed from 'npm ci' to 'npm install' to work without package-lock.json
+        run: npm install
 
       - name: Build
         run: npm run build
