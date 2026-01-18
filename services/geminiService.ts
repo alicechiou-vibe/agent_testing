@@ -1,7 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import { ReportType } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Check for API key immediately
+const apiKey = process.env.API_KEY;
+
+if (!apiKey) {
+  console.error("CRITICAL: process.env.API_KEY is missing or empty.");
+}
+
+const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy_key_to_prevent_init_crash' });
 
 const MODEL_NAME = 'gemini-3-pro-preview';
 
@@ -11,6 +18,10 @@ interface GenerateReportResult {
 }
 
 export const generateMarketReport = async (type: ReportType): Promise<GenerateReportResult> => {
+  if (!apiKey) {
+    throw new Error("API Key 未設定。請確認 GitHub Repository Secrets 中的 API_KEY 是否正確。");
+  }
+
   const now = new Date();
   const dateString = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeString = now.toLocaleTimeString('en-US');
@@ -76,8 +87,13 @@ export const generateMarketReport = async (type: ReportType): Promise<GenerateRe
 
     return { content, urls };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
-    throw new Error("Failed to generate market report. Please check API configuration.");
+    // Return a more user-friendly error message if possible
+    const errorMessage = error.message || "Unknown error";
+    if (errorMessage.includes("API key")) {
+        throw new Error("API Key 無效或過期。");
+    }
+    throw new Error(`生成報告失敗: ${errorMessage}`);
   }
 };
