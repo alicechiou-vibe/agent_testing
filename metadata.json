@@ -1,0 +1,5 @@
+{
+  "name": "Copy of MarketFlow AI",
+  "description": "An automated market intelligence dashboard that tracks US stock news, analyzes the Magnificent Seven, and generates daily briefing reports using Gemini. The content should be translated to Chinese.",
+  "requestFramePermissions": []
+}
