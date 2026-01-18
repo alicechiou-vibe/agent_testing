@@ -10,8 +10,10 @@ if (!apiKey) {
 
 const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy_key_to_prevent_init_crash' });
 
-// Switched to Flash model to prevent 429 Resource Exhausted errors and improve speed
-const MODEL_NAME = 'gemini-3-flash-preview';
+// Using gemini-2.5-flash as it has the highest free tier quotas (15 RPM) and is very stable for automation.
+const MODEL_NAME = 'gemini-2.5-flash';
+
+console.log(`[MarketFlow] Service initialized. Using model: ${MODEL_NAME}`);
 
 interface GenerateReportResult {
   content: string;
@@ -65,7 +67,6 @@ export const generateMarketReport = async (type: ReportType): Promise<GenerateRe
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        // responseMimeType: "text/plain", // Removed to let model decide best format with grounding
       },
     });
 
@@ -90,10 +91,10 @@ export const generateMarketReport = async (type: ReportType): Promise<GenerateRe
 
   } catch (error: any) {
     console.error("Gemini API Error:", error);
-    // Return a more user-friendly error message if possible
     const errorMessage = error.message || "Unknown error";
+    
     if (errorMessage.includes("429") || errorMessage.includes("Quota")) {
-        throw new Error("系統繁忙 (429)，請稍後再試。");
+        throw new Error("系統繁忙 (API 額度上限)，請稍後再試。");
     }
     if (errorMessage.includes("API key")) {
         throw new Error("API Key 無效或過期。");
