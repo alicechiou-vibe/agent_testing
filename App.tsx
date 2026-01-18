@@ -56,7 +56,11 @@ const App: React.FC = () => {
       if (isGeneratingRef.current) return;
 
       const now = new Date();
-      const currentHmm = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+      // Use explicit hours/minutes padding to match "HH:mm" format (e.g. "08:00", "22:00")
+      // This avoids issues with browser locales (e.g. "8:00 PM" vs "20:00")
+      const hours = now.getHours().toString().padStart(2, '0');
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      const currentHmm = `${hours}:${minutes}`;
       
       // Check Last Run to avoid running multiple times in the same minute
       const lastRun = localStorage.getItem('marketflow-last-auto-run');
@@ -66,18 +70,18 @@ const App: React.FC = () => {
       if (lastRun === runKey) return;
 
       if (currentHmm === config.morningTime) {
-        console.log("Triggering Auto Morning Report");
+        console.log(`[Automation] Triggering Morning Report at ${currentHmm}`);
         localStorage.setItem('marketflow-last-auto-run', runKey);
         handleGenerate(ReportType.MORNING);
       } else if (currentHmm === config.eveningTime) {
-        console.log("Triggering Auto Evening Report");
+        console.log(`[Automation] Triggering Evening Report at ${currentHmm}`);
         localStorage.setItem('marketflow-last-auto-run', runKey);
         handleGenerate(ReportType.EVENING);
       }
     };
 
-    // Check every 10 seconds
-    const intervalId = setInterval(checkSchedule, 10000);
+    // Check every 5 seconds to ensure we don't miss the minute
+    const intervalId = setInterval(checkSchedule, 5000);
     return () => clearInterval(intervalId);
   }, [config, currentType]); // Dependencies
 
