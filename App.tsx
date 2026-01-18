@@ -67,8 +67,10 @@ const App: React.FC = () => {
       // Save to local storage so user doesn't lose it on refresh
       localStorage.setItem(getStorageKey(typeToRun), JSON.stringify(completedReport));
       
-    } catch (error) {
-      setReport(prev => prev ? { ...prev, status: 'failed', content: "生成失敗，請檢查網路或稍後再試。" } : null);
+    } catch (error: any) {
+      console.error(error);
+      const msg = error.message || "生成失敗，請檢查網路或稍後再試。";
+      setReport(prev => prev ? { ...prev, status: 'failed', content: msg } : null);
     }
   };
 
