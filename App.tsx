@@ -1,13 +1,43 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { generateMarketReport } from './services/geminiService';
 import { ReportCard } from './components/ReportCard';
-import { ReportData, ReportType } from './types';
-import { Zap, RefreshCcw, Sun, Moon, Sparkles } from 'lucide-react';
+import { ConfigPanel } from './components/ConfigPanel';
+import { ReportData, ReportType, ReportConfig } from './types';
+import { Zap, RefreshCcw, Sun, Moon, Sparkles, Settings as SettingsIcon, X } from 'lucide-react';
+
+const DEFAULT_CONFIG: ReportConfig = {
+  isActive: false,
+  morningTime: "08:00",
+  eveningTime: "22:00", // 10:00 PM
+  email: ""
+};
 
 const App: React.FC = () => {
   const [currentType, setCurrentType] = useState<ReportType>(ReportType.MORNING);
   const [report, setReport] = useState<ReportData | null>(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const [config, setConfig] = useState<ReportConfig>(DEFAULT_CONFIG);
   
+  // Ref to track if we are currently generating to prevent double triggers
+  const isGeneratingRef = useRef(false);
+
+  // Load Config
+  useEffect(() => {
+    const savedConfig = localStorage.getItem('marketflow-config');
+    if (savedConfig) {
+      try {
+        setConfig(JSON.parse(savedConfig));
+      } catch (e) {
+        console.error("Failed to parse config", e);
+      }
+    }
+  }, []);
+
+  // Save Config on change
+  useEffect(() => {
+    localStorage.setItem('marketflow-config', JSON.stringify(config));
+  }, [config]);
+
   // Initialize context based on time of day
   useEffect(() => {
     const hour = new Date().getHours();
@@ -17,6 +47,39 @@ const App: React.FC = () => {
     setCurrentType(type);
     loadSavedReport(type);
   }, []);
+
+  // Automation Loop
+  useEffect(() => {
+    if (!config.isActive) return;
+
+    const checkSchedule = () => {
+      if (isGeneratingRef.current) return;
+
+      const now = new Date();
+      const currentHmm = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+      
+      // Check Last Run to avoid running multiple times in the same minute
+      const lastRun = localStorage.getItem('marketflow-last-auto-run');
+      // Key format: YYYY-MM-DD-HH:mm
+      const runKey = `${now.toDateString()}-${currentHmm}`;
+
+      if (lastRun === runKey) return;
+
+      if (currentHmm === config.morningTime) {
+        console.log("Triggering Auto Morning Report");
+        localStorage.setItem('marketflow-last-auto-run', runKey);
+        handleGenerate(ReportType.MORNING);
+      } else if (currentHmm === config.eveningTime) {
+        console.log("Triggering Auto Evening Report");
+        localStorage.setItem('marketflow-last-auto-run', runKey);
+        handleGenerate(ReportType.EVENING);
+      }
+    };
+
+    // Check every 10 seconds
+    const intervalId = setInterval(checkSchedule, 10000);
+    return () => clearInterval(intervalId);
+  }, [config, currentType]); // Dependencies
 
   const getStorageKey = (type: ReportType) => {
     const today = new Date().toDateString();
@@ -38,6 +101,9 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = async (forceType?: ReportType) => {
+    if (isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
+
     const typeToRun = forceType || currentType;
     
     // Create skeleton
@@ -71,6 +137,8 @@ const App: React.FC = () => {
       console.error(error);
       const msg = error.message || "生成失敗，請檢查網路或稍後再試。";
       setReport(prev => prev ? { ...prev, status: 'failed', content: msg } : null);
+    } finally {
+      isGeneratingRef.current = false;
     }
   };
 
@@ -84,7 +152,7 @@ const App: React.FC = () => {
   const isMorning = currentType === ReportType.MORNING;
 
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-200 pb-12">
+    <div className="min-h-screen bg-[#0f172a] text-slate-200 pb-12 relative overflow-x-hidden">
       {/* Mobile Top Bar */}
       <header className="px-6 pt-8 pb-4 flex justify-between items-center sticky top-0 bg-[#0f172a]/80 backdrop-blur-md z-20">
         <div className="flex items-center gap-2.5">
@@ -94,14 +162,40 @@ const App: React.FC = () => {
           <span className="font-bold text-xl tracking-tight">MarketFlow</span>
         </div>
         
-        <button 
-          onClick={toggleContext}
-          className="p-2.5 rounded-full bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition-colors active:scale-95"
-          aria-label="Switch Mode"
-        >
-          {isMorning ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setShowConfig(true)}
+            className="p-2.5 rounded-full bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition-colors active:scale-95"
+            aria-label="Settings"
+          >
+            <SettingsIcon className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={toggleContext}
+            className="p-2.5 rounded-full bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition-colors active:scale-95"
+            aria-label="Switch Mode"
+          >
+            {isMorning ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+          </button>
+        </div>
       </header>
+
+      {/* Settings Modal */}
+      {showConfig && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl relative animate-in slide-in-from-bottom duration-300">
+            <button 
+              onClick={() => setShowConfig(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <div className="p-1">
+              <ConfigPanel config={config} onUpdate={setConfig} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="px-4 max-w-md mx-auto w-full">
         
@@ -116,6 +210,12 @@ const App: React.FC = () => {
               : <span>為您整理今天的 <span className="text-indigo-400 font-medium">市場重點新聞</span></span>
             }
           </p>
+          {config.isActive && (
+            <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 font-medium">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              自動排程已啟用 ({config.eveningTime})
+            </div>
+          )}
         </div>
 
         {/* Action Area */}
